@@ -1,6 +1,9 @@
 package nuber.students;
 
 import java.util.concurrent.Future;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A single Nuber region that operates independently of other regions, other than getting 
@@ -18,6 +21,12 @@ import java.util.concurrent.Future;
  */
 public class NuberRegion {
 
+	private NuberDispatch dispatch;
+	private String regionName;
+	private int maxSimultaneousJobs;
+	private ExecutorService executorService;
+	private AtomicBoolean isShutDown;
+
 	
 	/**
 	 * Creates a new Nuber region
@@ -28,7 +37,11 @@ public class NuberRegion {
 	 */
 	public NuberRegion(NuberDispatch dispatch, String regionName, int maxSimultaneousJobs)
 	{
-		
+		this.dispatch = dispatch;
+		this.regionName = regionName;
+		this.maxSimultaneousJobs = maxSimultaneousJobs;
+		this.executorService = Executors.newFixedThreadPool(maxSimultaneousJobs);
+		this.isShutDown = new AtomicBoolean(false);	
 
 	}
 	
@@ -44,7 +57,19 @@ public class NuberRegion {
 	 * @return a Future that will provide the final BookingResult object from the completed booking
 	 */
 	public Future<BookingResult> bookPassenger(Passenger waitingPassenger)
-	{		
+	{
+		if (isShutDown.get()){
+			dispatch.logEvent(null, regionName + ": Rejected Booking (region shut down)");
+			return null;
+		}		
+
+		Booking newBooking = new Booking(dispatch, waitingPassenger);
+
+		dispatch.logEvent(newBooking, "Creating booking in region " + regionName);
+
+		Future<BookingResult> result = executorService.submit(newBooking);
+
+		return result;
 		
 	}
 	
@@ -53,6 +78,9 @@ public class NuberRegion {
 	 */
 	public void shutdown()
 	{
+		isShutDown.set(true);
+		executorService.shutdown();
+		dispatch.logEvent(null, regionName + ": Shutdown initiated");
 	}
 		
 }
