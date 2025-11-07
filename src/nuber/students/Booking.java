@@ -1,4 +1,6 @@
 package nuber.students;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 
@@ -18,7 +20,14 @@ package nuber.students;
  * @author james
  *
  */
-public class Booking {
+public class Booking implements Callable<BookingResult> {
+
+	private static final AtomicInteger nextId = new AtomicInteger(1);
+	private final int bookingId;
+	private final NuberDispatch dispatch;
+	private final Passenger passenger;
+	private Driver driver;
+	private long startTime;
 
 		
 	/**
@@ -31,6 +40,12 @@ public class Booking {
 	 */
 	public Booking(NuberDispatch dispatch, Passenger passenger)
 	{
+		this.dispatch = dispatch;
+		this.passenger = passenger;
+		this.bookingId = nextId.getAndIncrement();
+		this.startTime = System.currentTimeMillis();
+
+		dispatch.logEvent(this, String.format("%d:null:null: Creating booking", bookingId));
 	}
 	
 	/**
@@ -43,14 +58,48 @@ public class Booking {
 	 * 4.	It must then call the Driver.driveToDestination() function, with the thread pausing 
 	 * 			whilst as function is called.
 	 * 5.	Once at the destination, the time is recorded, so we know the total trip duration. 
-	 * 6.	The driver, now free, is added back into Dispatch’s list of available drivers. 
+	 * 6.	The driver, now free, is added back into Dispatchï¿½s list of available drivers. 
 	 * 7.	The call() function the returns a BookingResult object, passing in the appropriate 
 	 * 			information required in the BookingResult constructor.
 	 *
 	 * @return A BookingResult containing the final information about the booking 
 	 */
+	@Override
 	public BookingResult call() {
+		try {
+			dispatch.logEvent(this, String.format("%d:Null:P-%s: Starting booking, getting driver",
+				bookingId, passenger.name));
 
+			driver = dispatch.getDriver();
+
+			if (driver == null){
+				dispatch.logEvent(this, String.format("%d:null:%s: Rejected booking",
+					bookingId, passenger.name));
+				return null;
+			}
+
+			dispatch.logEvent(this, String.format("%d:D-%s:P-%s: Starting, on way to passenger",
+				bookingId, driver.name, passenger.name));
+			driver.pickUpPassenger(passenger);
+
+
+			dispatch.logEvent(this, String.format("%d:D-%s:P-%s: Collected passenger, on way to destination",
+				bookingId, driver.name, passenger.name));
+			driver.driveToDestination();
+
+			dispatch.logEvent(this, String.format("%d:D-%s:P-%s: At destination, driver is now free",
+				bookingId, driver.name, passenger.name));
+
+			dispatch.returnDriver(driver);
+			driver.releasePassenger();
+
+			int totalDuration = (int) (System.currentTimeMillis() - startTime);
+
+			return new BookingResult(bookingId, passenger, driver, totalDuration);
+		} catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		}
 	}
 	
 	/***
@@ -66,6 +115,7 @@ public class Booking {
 	@Override
 	public String toString()
 	{
+		return "Booking ID: " + bookingId;
 	}
 
 }
