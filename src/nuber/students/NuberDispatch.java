@@ -2,6 +2,9 @@ package nuber.students;
 
 import java.util.HashMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * The core Dispatch class that instantiates and manages everything for Nuber
@@ -17,6 +20,9 @@ public class NuberDispatch {
 	private final int MAX_DRIVERS = 999;
 	
 	private boolean logEvents = false;
+	private BlockingQueue<Driver> idleDrivers; 
+	private ConcurrentHashMap<String, NuberRegion> regions;
+	private int getBookingsAwaitingDriver = 0;
 	
 	/**
 	 * Creates a new dispatch objects and instantiates the required regions and any other objects required.
@@ -27,6 +33,22 @@ public class NuberDispatch {
 	 */
 	public NuberDispatch(HashMap<String, Integer> regionInfo, boolean logEvents)
 	{
+		this.logEvents = logEvents; 
+		this.idleDrivers = new LinkedBlockingQueue<>(MAX_DRIVERS);
+		this.regions = new ConcurrentHashMap<>();
+
+		logEvent(null, "Creating Nuber Dispatch");
+		logEvent(null, "Creating " + regionInfo.size() + " regions");
+
+		for (String regionName : regionInfo.keySet()){
+			int maxBookings = regionInfo.get(regionName);
+			logEvent(null, "Creating Nuber region for " + regionName);
+
+			NuberRegion region = new NuberRegion(this, regionName, maxBookings);
+			regions.put(regionName, region);
+		}
+
+		logEvent(null, "Done creating " + regionInfo.size() + " regions");
 	}
 	
 	/**
@@ -39,6 +61,15 @@ public class NuberDispatch {
 	 */
 	public boolean addDriver(Driver newDriver)
 	{
+		if (newDriver == null) return false; 
+
+		try {
+			idleDrivers.put(newDriver);
+			return true; 
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return false;
+		}
 	}
 	
 	/**
@@ -50,6 +81,17 @@ public class NuberDispatch {
 	 */
 	public Driver getDriver()
 	{
+		try{
+			synchronized (this) {
+				if (getBookingsAwaitingDriver > 0)
+				 getBookingsAwaitingDriver--;
+			}
+
+			return idleDrivers.take();
+		} catch (InterruptedException e){
+			Thread.currentThread().interrupt();
+			return null;
+		}
 	}
 
 	/**
@@ -63,8 +105,10 @@ public class NuberDispatch {
 	public void logEvent(Booking booking, String message) {
 		
 		if (!logEvents) return;
-		
-		System.out.println(booking + ": " + message);
+		if (booking == null)
+			System.out.println(message);
+		else
+			System.out.println(booking + ": " + message);
 		
 	}
 
@@ -80,6 +124,17 @@ public class NuberDispatch {
 	 * @return returns a Future<BookingResult> object
 	 */
 	public Future<BookingResult> bookPassenger(Passenger passenger, String region) {
+		NuberRegion targetRegion = regions.get(region);
+		if (targetRegion == null){
+			logEvent(null, "Region not found: " + region);
+			return null;
+		}
+
+		synchronized (this) {
+			bookingsAwaitingDriver++;
+		}
+
+		return targetRegion.bookPassenger(passenger);
 	}
 
 	/**
@@ -91,12 +146,28 @@ public class NuberDispatch {
 	 */
 	public int getBookingsAwaitingDriver()
 	{
+		synchronized (this) {
+			return bookingsAwaitingDriver;
+		}
 	}
 	
 	/**
 	 * Tells all regions to finish existing bookings already allocated, and stop accepting new bookings
 	 */
 	public void shutdown() {
+		for (NuberRegion region : regions.values()){
+			region.shutdown();
+		}
+	}
+
+	public void returnDriver(Driver driver){
+		if (driver != null){
+			try {
+				idleDrivers.put(driver);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		}
 	}
 
 }
